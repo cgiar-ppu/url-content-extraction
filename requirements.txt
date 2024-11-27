@@ -1,0 +1,5 @@
+asyncio
+aiohttp
+beautifulsoup4
+pdfminer.six
+urllib.parse
