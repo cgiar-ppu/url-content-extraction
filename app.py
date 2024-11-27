@@ -70,7 +70,7 @@ def extract_pdf_links(soup, base_url):
     return links
 
 # Function to fetch content from a single URL
-async def fetch_content(session, A, url):
+async def fetch_content(session, other_data, url):
     try:
         async with session.get(url, timeout=30, ssl=False) as response:
             response.raise_for_status()
@@ -79,7 +79,7 @@ async def fetch_content(session, A, url):
                 # Directly fetch and extract content from PDF
                 content = await response.read()
                 text = extract_pdf_content(url, content)
-                return A, url, text, '', 'pdf'  # Empty string for PDF links content
+                return other_data, url, text, '', 'pdf'  # Empty string for PDF links content
             else:
                 # Handle HTML content
                 content = await response.text()
@@ -102,21 +102,21 @@ async def fetch_content(session, A, url):
                         continue  # Move to the next PDF link
                 # Combine all PDF contents
                 combined_pdf_content = "\n".join(pdf_contents)
-                return A, url, text, combined_pdf_content, 'html'
+                return other_data, url, text, combined_pdf_content, 'html'
     except Exception as e:
         # Return empty content on error; optionally log the error
         # print(f"Error fetching {url}: {str(e)}")
-        return A, url, '', '', 'error'
+        return other_data, url, '', '', 'error'
 
 # Main function to process URLs asynchronously
 async def process_urls(tasks_to_process):
     results = []
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_content(session, A, url) for A, url in tasks_to_process]
+        tasks = [fetch_content(session, other_data, url) for other_data, url in tasks_to_process]
         progress_bar = st.progress(0)
         for idx, future in enumerate(asyncio.as_completed(tasks)):
-            A, url, content, pdf_content, content_type = await future
-            results.append((A, url, content, pdf_content, content_type))
+            other_data, url, content, pdf_content, content_type = await future
+            results.append((other_data, url, content, pdf_content, content_type))
             progress_bar.progress((idx + 1) / len(tasks))
         return results
 
@@ -133,13 +133,16 @@ def main():
 
         # Assume the URLs are in a column named 'URL'
         if 'URL' in df.columns:
-            url_cells = df['URL'].dropna().tolist()
-            # Build a list of (A, URL) tuples
             tasks_to_process = []
-            for cell in url_cells:
+            # Iterate over each row in the dataframe
+            for idx, row in df.iterrows():
+                cell = row['URL']
                 urls_in_cell = [url.strip() for url in str(cell).split(',')]
+                # For each URL, store the entire row data along with the URL
+                other_data = row.to_dict()
+                del other_data['URL']  # Remove the 'URL' key, as we will have the URL separately
                 for url in urls_in_cell:
-                    tasks_to_process.append((cell, url))
+                    tasks_to_process.append((other_data, url))
 
             if st.button("Start Extraction"):
                 st.write("Processing URLs...")
@@ -150,13 +153,13 @@ def main():
 
                 # Prepare output data
                 output_data = []
-                for A, url, content, pdf_content, content_type in results:
-                    # Skip entries with empty content if desired
-                    if content or pdf_content:
-                        output_data.append({'A': A, 'URL': url, 'Extracted Text': content, 'PDF Content': pdf_content})
-                    else:
-                        # Optionally include entries with no content
-                        output_data.append({'A': A, 'URL': url, 'Extracted Text': '', 'PDF Content': ''})
+                for other_data, url, content, pdf_content, content_type in results:
+                    # Prepare the result row by combining other data with extraction results
+                    result_row = other_data.copy()
+                    result_row['URL'] = url
+                    result_row['Extracted Text'] = content
+                    result_row['PDF Content'] = pdf_content
+                    output_data.append(result_row)
 
                 # Create DataFrame from the results
                 output_df = pd.DataFrame(output_data)
