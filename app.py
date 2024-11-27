@@ -47,7 +47,7 @@ def extract_pdf_links(soup, base_url):
 # Function to fetch content from a single URL
 async def fetch_content(session, url):
     try:
-        async with session.get(url, timeout=30) as response:
+        async with session.get(url, timeout=30, ssl=False) as response:
             response.raise_for_status()
             content_type = response.headers.get('Content-Type', '').lower()
             if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
@@ -66,7 +66,7 @@ async def fetch_content(session, url):
                 pdf_contents = []
                 for pdf_link in pdf_links:
                     try:
-                        async with session.get(pdf_link, timeout=30) as pdf_response:
+                        async with session.get(pdf_link, timeout=30, ssl=False) as pdf_response:
                             pdf_response.raise_for_status()
                             pdf_content = await pdf_response.read()
                             pdf_text = extract_pdf_content(pdf_link, pdf_content)
