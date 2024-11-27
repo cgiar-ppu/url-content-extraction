@@ -3,3 +3,4 @@ aiohttp==3.11.4
 beautifulsoup4
 pdfminer.six
 urllib3
+openpyxl
