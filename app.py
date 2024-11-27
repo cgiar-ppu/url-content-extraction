@@ -198,9 +198,10 @@ def main():
                     result_df = pd.DataFrame(columns=['URL', 'Status', 'Retries', 'Error Message'])
                     semaphore = asyncio.Semaphore(max_concurrent_tasks)
                     async with aiohttp.ClientSession() as session:
-                        tasks = [fetch_content(
+                        # Wrap coroutines in tasks
+                        tasks = [asyncio.create_task(fetch_content(
                             session, semaphore, other_data, url, min_delay, max_delay, base_delay, max_retries, status_queue
-                        ) for other_data, url in tasks_to_process]
+                        )) for other_data, url in tasks_to_process]
                         total_tasks = len(tasks)
                         for idx, future in enumerate(asyncio.as_completed(tasks)):
                             # Update progress information
