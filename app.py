@@ -6,21 +6,18 @@ from bs4 import BeautifulSoup
 from io import BytesIO
 import re
 import urllib.parse  # Import urllib.parse to resolve URLs
-from pypdf import PdfReader
+# Import extract_text from pdfminer.high_level
+from pdfminer.high_level import extract_text
 
-# Function to extract text from PDF content using PyPDF
+# Function to extract text from PDF content using pdfminer.six
 def extract_pdf_content(url, content):
     try:
         if not content or len(content) < 100:
             return ""
         content_stream = BytesIO(content)
         try:
-            reader = PdfReader(content_stream)
-            text = ""
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
+            # Use pdfminer.six's extract_text function to extract text with proper spacing
+            text = extract_text(content_stream)
             return text
         except Exception as e:
             return f"Error extracting PDF content from {url}: {str(e)}"
