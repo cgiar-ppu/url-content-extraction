@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import asyncio
 import aiohttp
+import random  # Import random for delays
 from bs4 import BeautifulSoup
 from io import BytesIO
 import re
@@ -28,7 +29,6 @@ def remove_illegal_characters(text):
         )
     else:
         return text
-
 
 # Function to extract text from PDF content using pdfminer.six
 def extract_pdf_content(url, content):
@@ -70,49 +70,73 @@ def extract_pdf_links(soup, base_url):
     return links
 
 # Function to fetch content from a single URL
-async def fetch_content(session, other_data, url):
-    try:
-        async with session.get(url, timeout=30, ssl=False) as response:
-            response.raise_for_status()
-            content_type = response.headers.get('Content-Type', '').lower()
-            if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
-                # Directly fetch and extract content from PDF
-                content = await response.read()
-                text = extract_pdf_content(url, content)
-                return other_data, url, text, '', 'pdf'  # Empty string for PDF links content
-            else:
-                # Handle HTML content
-                content = await response.text()
-                # Parse and extract text using BeautifulSoup
-                soup = BeautifulSoup(content, 'html.parser')
-                text = soup.get_text(separator='\n')
-                # Extract PDF links from the page
-                pdf_links = extract_pdf_links(soup, url)
-                pdf_contents = []
-                for pdf_link in pdf_links:
-                    try:
-                        async with session.get(pdf_link, timeout=30, ssl=False) as pdf_response:
-                            pdf_response.raise_for_status()
-                            pdf_content = await pdf_response.read()
-                            pdf_text = extract_pdf_content(pdf_link, pdf_content)
-                            pdf_contents.append(pdf_text)
-                    except Exception as e:
-                        # Skip appending error message; optionally log the error
-                        # print(f"Error fetching {pdf_link}: {str(e)}")
-                        continue  # Move to the next PDF link
-                # Combine all PDF contents
-                combined_pdf_content = "\n".join(pdf_contents)
-                return other_data, url, text, combined_pdf_content, 'html'
-    except Exception as e:
-        # Return empty content on error; optionally log the error
-        # print(f"Error fetching {url}: {str(e)}")
-        return other_data, url, '', '', 'error'
+async def fetch_content(session, semaphore, other_data, url, min_delay, max_delay, base_delay, max_retries):
+    async with semaphore:
+        retries = 0
+        while retries <= max_retries:
+            try:
+                # Wait a random delay before making the request
+                delay = random.uniform(min_delay, max_delay)
+                await asyncio.sleep(delay)
+                # Now make the request
+                async with session.get(url, timeout=30, ssl=False) as response:
+                    response.raise_for_status()
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if 'application/pdf' in content_type or url.lower().endswith('.pdf'):
+                        # Directly fetch and extract content from PDF
+                        content = await response.read()
+                        text = extract_pdf_content(url, content)
+                        return other_data, url, text, '', 'pdf'  # Empty string for PDF links content
+                    else:
+                        # Handle HTML content
+                        content = await response.text()
+                        # Parse and extract text using BeautifulSoup
+                        soup = BeautifulSoup(content, 'html.parser')
+                        text = soup.get_text(separator='\n')
+                        # Extract PDF links from the page
+                        pdf_links = extract_pdf_links(soup, url)
+                        pdf_contents = []
+                        for pdf_link in pdf_links:
+                            # Wait before fetching each PDF link
+                            pdf_delay = random.uniform(min_delay, max_delay)
+                            await asyncio.sleep(pdf_delay)
+                            pdf_retries = 0
+                            while pdf_retries <= max_retries:
+                                try:
+                                    async with session.get(pdf_link, timeout=30, ssl=False) as pdf_response:
+                                        pdf_response.raise_for_status()
+                                        pdf_content = await pdf_response.read()
+                                        pdf_text = extract_pdf_content(pdf_link, pdf_content)
+                                        pdf_contents.append(pdf_text)
+                                    break  # Exit the retry loop on success
+                                except Exception as e:
+                                    pdf_retries += 1
+                                    if pdf_retries > max_retries:
+                                        # Optionally log the error
+                                        # print(f"Max retries reached for {pdf_link}: {str(e)}")
+                                        break
+                                    backoff_delay = base_delay * (2 ** (pdf_retries - 1)) + random.uniform(0, 1)
+                                    await asyncio.sleep(backoff_delay)
+                                    continue
+                        # Combine all PDF contents
+                        combined_pdf_content = "\n".join(pdf_contents)
+                        return other_data, url, text, combined_pdf_content, 'html'
+            except Exception as e:
+                retries += 1
+                if retries > max_retries:
+                    # Return empty content on error; optionally log the error
+                    # print(f"Max retries reached for {url}: {str(e)}")
+                    return other_data, url, '', '', 'error'
+                backoff_delay = base_delay * (2 ** (retries - 1)) + random.uniform(0, 1)
+                await asyncio.sleep(backoff_delay)
+                continue  # Retry the loop
 
 # Main function to process URLs asynchronously
-async def process_urls(tasks_to_process):
+async def process_urls(tasks_to_process, max_concurrent_tasks, min_delay, max_delay, base_delay, max_retries):
     results = []
+    semaphore = asyncio.Semaphore(max_concurrent_tasks)
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_content(session, other_data, url) for other_data, url in tasks_to_process]
+        tasks = [fetch_content(session, semaphore, other_data, url, min_delay, max_delay, base_delay, max_retries) for other_data, url in tasks_to_process]
         progress_bar = st.progress(0)
         for idx, future in enumerate(asyncio.as_completed(tasks)):
             other_data, url, content, pdf_content, content_type = await future
@@ -133,6 +157,14 @@ def main():
 
         # Assume the URLs are in a column named 'URL'
         if 'URL' in df.columns:
+            # Add options to set parameters
+            st.sidebar.write("Settings")
+            max_concurrent_tasks = st.sidebar.slider("Max Concurrent Tasks", 1, 50, 10)
+            min_delay = st.sidebar.number_input("Min Delay between requests (seconds)", min_value=0.0, value=1.0)
+            max_delay = st.sidebar.number_input("Max Delay between requests (seconds)", min_value=0.0, value=3.0)
+            base_delay = st.sidebar.number_input("Base Delay for Exponential Backoff (seconds)", min_value=1.0, value=2.0)
+            max_retries = st.sidebar.number_input("Max Retries on Error", min_value=0, value=3)
+
             tasks_to_process = []
             # Iterate over each row in the dataframe
             for idx, row in df.iterrows():
@@ -149,7 +181,13 @@ def main():
                 # Run the asynchronous processing
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                results = loop.run_until_complete(process_urls(tasks_to_process))
+                results = loop.run_until_complete(process_urls(
+                    tasks_to_process,
+                    max_concurrent_tasks,
+                    min_delay,
+                    max_delay,
+                    base_delay,
+                    max_retries))
 
                 # Prepare output data
                 output_data = []
