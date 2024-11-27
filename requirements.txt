@@ -1,5 +1,5 @@
 asyncio
-aiohttp
+aiohttp==3.11.4
 beautifulsoup4
 pdfminer.six
 urllib
