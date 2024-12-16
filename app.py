@@ -183,6 +183,7 @@ def main():
                 # Placeholders for dynamic updates
                 progress_bar = st.progress(0)
                 status_placeholder = st.empty()
+                download_button_placeholder = st.empty()   # New placeholder for the download button
                 result_table_placeholder = st.empty()
                 log_placeholder = st.container()
 
@@ -244,7 +245,8 @@ def main():
                     output_df.to_excel(writer, index=False)
                 excel_data = output.getvalue()
 
-                st.download_button(
+                # Update the download button placeholder
+                download_button_placeholder.download_button(
                     label="Download data as Excel",
                     data=excel_data,
                     file_name='extracted_text.xlsx',
